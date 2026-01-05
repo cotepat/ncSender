@@ -89,6 +89,19 @@ export function registerCncEventHandlers({
           log('Initializing firmware after controller connection...');
           await initializeFirmwareOnConnection(cncController);
           log('Firmware initialization complete');
+
+          // Get $22 (homing cycle) setting value for client
+          try {
+            const firmwareData = JSON.parse(await fs.readFile(firmwareFilePath, 'utf8'));
+            const setting22 = firmwareData.settings?.['22'];
+            // Store raw value, default to 7 (enabled + single axis + startup required) if not found
+            serverState.machineState.homeCycle = setting22?.value !== undefined ? parseInt(setting22.value, 10) : 7;
+            log(`Home cycle ($22): ${serverState.machineState.homeCycle}`);
+          } catch (error) {
+            // Default to 7 (homing enabled + startup required) if we can't read firmware settings
+            serverState.machineState.homeCycle = 7;
+            log('Could not read $22 setting, defaulting homeCycle to 7');
+          }
         } catch (error) {
           log('Failed to initialize firmware on connection:', error?.message || error);
         }
@@ -153,6 +166,13 @@ export function registerCncEventHandlers({
       if (valueChanged && firmwareData.settings[id]?.halDetails?.[7] === '1') {
         const restartMessage = `(Setting $${id} changed - Controller restart required for changes to take effect)`;
         broadcast('cnc-data', restartMessage);
+      }
+
+      // Update homeCycle if $22 changed
+      if (id === '22' && valueChanged) {
+        serverState.machineState.homeCycle = parseInt(newValue, 10);
+        log(`$22 changed - homeCycle: ${serverState.machineState.homeCycle}`);
+        broadcast('server-state-updated', serverState);
       }
     } catch (error) {
       log('Failed to update firmware.json from command-ack:', error?.message || error);
